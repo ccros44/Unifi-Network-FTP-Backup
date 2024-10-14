@@ -14,7 +14,7 @@ For example, the following hardware is technically still supported by Unifi, but
  - Unifi Dream Machine
  - Unifi Dream Router
 
-There is a solution. Most people don’t need a full backup of their Unifi Console. They're mainly interested in restoring a backup of just Unifi Network, the application that runs on top of Unifi Console for managing their network enviroment. With this in mind, I have put together this script. This script will automatically set up Unifi hardware running Unifi Network to send the Unifi Network backup files to an FTP server every  at a time of your choosing.
+There is a solution. Most people don’t need a full backup of their Unifi Console. They're mainly interested in restoring a backup of just Unifi Network, the application that runs on top of Unifi Console for managing their network environment. With this in mind, I have put together this script. This script will automatically set up Unifi hardware running Unifi Network to send the Unifi Network backup files to an FTP server every  at a time of your choosing.
 
 ## Requirements
 
