@@ -38,13 +38,13 @@ chmod +x ftp_setup.sh
 ```
 
 Edit the parameters of the last command as follows:
-  -h - The hour that you want the backup to run.
-  -m - The minute you want the backup to run.
-  -f - Folder on the FTP server where you want to backup to. Put in '' to escape special characters.
-  -i - IP address of the FTP server. Put in '' to escape special characters.
-  -u - Username of the FTP server. Put in '' to escape special characters.
-  -p - Password of the FTP server. Put in '' to escape special characters.
-  -r - (OPTIONAL) Set -r to 1 to enable replacment of any lftp_autoupload.sh perviously created.
+ - h - The hour that you want the backup to run.
+ - m - The minute you want the backup to run.
+ - f - Folder on the FTP server where you want to backup to. Put in '' to escape special characters.
+ - i - IP address of the FTP server. Put in '' to escape special characters.
+ - u - Username of the FTP server. Put in '' to escape special characters.
+ - p - Password of the FTP server. Put in '' to escape special characters.
+ - r - (OPTIONAL) Set -r to 1 to enable replacment of any lftp_autoupload.sh perviously created.
 
 ## Credits & Licence
 
