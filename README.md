@@ -29,7 +29,7 @@ The script should work on all currently supported Unifi devices that run Unifi N
  
  ## Usage 
 
-Download the script, then execute it qith the parameters set to your use case.
+Download the script, then execute it with the parameters set to your use case.
 
 ```bash
 curl -O https://raw.githubusercontent.com/ccros44/Unifi-Network-FTP-Backup/refs/heads/main/ftp_setup.sh
