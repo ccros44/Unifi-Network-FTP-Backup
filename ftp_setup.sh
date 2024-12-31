@@ -160,11 +160,12 @@ if [ -e /data/unifi/data/backup/lftp_autoupload.sh ]; then
     echo 'SOURCEFOLDER='/data/unifi/data/backup/autobackup/'' >> /data/unifi/data/backup/lftp_autoupload.sh
     echo '' >> /data/unifi/data/backup/lftp_autoupload.sh
     echo 'lftp -f "' >> /data/unifi/data/backup/lftp_autoupload.sh
+    echo 'set ssl-allow true' >> /data/unifi/data/backup/lftp_autoupload.sh
     echo 'set ssl:verify-certificate false' >> /data/unifi/data/backup/lftp_autoupload.sh
     echo 'open $HOST' >> /data/unifi/data/backup/lftp_autoupload.sh
     echo 'user $USER $PASS' >> /data/unifi/data/backup/lftp_autoupload.sh
     echo 'lcd $SOURCEFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'mirror --reverse --delete --verbose $SOURCEFOLDER $TARGETFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
+    echo 'mirror -p --reverse --delete --verbose $SOURCEFOLDER $TARGETFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
     echo 'bye' >> /data/unifi/data/backup/lftp_autoupload.sh
     echo '"' >> /data/unifi/data/backup/lftp_autoupload.sh
     chmod +x /data/unifi/data/backup/lftp_autoupload.sh
@@ -182,11 +183,12 @@ else
   echo 'SOURCEFOLDER='/data/unifi/data/backup/autobackup/'' >> /data/unifi/data/backup/lftp_autoupload.sh
   echo '' >> /data/unifi/data/backup/lftp_autoupload.sh
   echo 'lftp -f "' >> /data/unifi/data/backup/lftp_autoupload.sh
+  echo 'set ssl-allow true' >> /data/unifi/data/backup/lftp_autoupload.sh
   echo 'set ssl:verify-certificate false' >> /data/unifi/data/backup/lftp_autoupload.sh
   echo 'open $HOST' >> /data/unifi/data/backup/lftp_autoupload.sh
   echo 'user $USER $PASS' >> /data/unifi/data/backup/lftp_autoupload.sh
   echo 'lcd $SOURCEFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'mirror --reverse --delete --verbose $SOURCEFOLDER $TARGETFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
+  echo 'mirror -p --reverse --delete --verbose $SOURCEFOLDER $TARGETFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
   echo 'bye' >> /data/unifi/data/backup/lftp_autoupload.sh
   echo '"' >> /data/unifi/data/backup/lftp_autoupload.sh
   chmod +x /data/unifi/data/backup/lftp_autoupload.sh
