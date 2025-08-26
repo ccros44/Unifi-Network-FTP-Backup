@@ -88,14 +88,15 @@ files=$(shopt -s nullglob dotglob; echo /data/unifi/data/backup/autobackup/*)
 if (( ${#files} ))
 then
   echo "Unifi Network appears to be backing up files to autobackup."
-else 
+else
   echo ""
   echo "!!WARNING!!"
   echo "autobackup is empty."
   echo "!!WARNING!!"
   echo "Check the settings for Unifi network's backup schedule."
   echo ""
-  echo "The script will now proceed with the lftp_autoupload setup."
+  echo "The script will now proceed with the lftp_autoupload setup in 5 seconds."
+  sleep 5
 fi
 
 #apt update
@@ -106,8 +107,13 @@ aptupdate_status=$?
 if [ $aptupdate_status -eq 0 ]; then
   echo "Apt update was successful."
 else
-  echo "Apt update failed. Please check your Unifi OS configuration."
-  exit 1 #issues with apt will prevent installation of dependencies
+  echo "Apt update failed. do you want to continue anyway?"
+  select yn in "Yes" "No"; do
+    case $yn in
+      Yes ) echo "Continuing..."; break;;
+      No ) exit 1;;
+    esac
+  done
 fi
 
 # Check for LFTP
