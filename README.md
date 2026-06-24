@@ -25,7 +25,7 @@ On a schedule, the generated upload script:
 2. Downloads the resulting `.unf` file into a staging folder (`/data/unifi/data/backup/ftp_staging`), keeping the most recent 30 backups.
 3. Mirrors the staging folder to your FTP server with `lftp`.
 
-It also installs an `on_boot.d` handler so the schedule is automatically restored after a reboot or firmware update, and it (re)installs `curl`/`lftp` at run time if a firmware update has removed them.
+It also installs an `on_boot.d` handler so the schedule is automatically restored after a reboot, and it (re)installs `curl`/`lftp` at run time of the lftp_upload.sh script if a firmware update has removed them.
 
 ## Requirements
 
