@@ -4,19 +4,21 @@
 helpFunction()
 {
   echo ""
-  echo "Usage Example: $0 -h 01 -m 10 -f '/CloudKeys/Client/Folder/' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -r 1"
+  echo "Usage Example: $0 -h 01 -m 10 -f '/CloudKeys/Client/Folder/' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -k 'your-api-key' -s 'default' -r 1"
   echo -e "\t-h - The hour that you want the backup to run."
   echo -e "\t-m - The minute you want the backup to run."
   echo -e "\t-f - Folder on the FTP server where you want to backup to. Put in '' to escape special characters."
   echo -e "\t-i - IP address of the FTP server. Put in '' to escape special characters."
   echo -e "\t-u - Username of the FTP server. Put in '' to escape special characters."
   echo -e "\t-p - Password of the FTP server. Put in '' to escape special characters."
-  echo -e "\t-r - (OPTIONAL) Set -r to 1 to enable replacment of any lftp_autoupload.sh perviously created."
+  echo -e "\t-k - UniFi Network local API key (Settings > Control Plane > Integrations). Put in '' to escape special characters."
+  echo -e "\t-s - (OPTIONAL) UniFi site name. Defaults to 'default'."
+  echo -e "\t-r - (OPTIONAL) Set -r to 1 to enable replacement of any lftp_autoupload.sh previously created."
   exit 1 # Exit script after printing help
 }
 
 # Get Parameters
-while getopts "h:m:f:i:u:p:r:" opt
+while getopts "h:m:f:i:u:p:k:s:r:" opt
 do
   case "$opt" in
     h ) parameterH="$OPTARG" ;;
@@ -25,10 +27,15 @@ do
     i ) parameterI="$OPTARG" ;;
     u ) parameterU="$OPTARG" ;;
     p ) parameterP="$OPTARG" ;;
+    k ) parameterK="$OPTARG" ;;
+    s ) parameterS="$OPTARG" ;;
     r ) parameterR="$OPTARG" ;;
     ? ) helpFunction ;; # Print helpFunction in case parameter is non-existent
   esac
 done
+
+# Default optional parameters
+SITE_PARAM=${parameterS:-default}
 
 # Print Help in case parameters are empty
 if [ -z "$parameterH" ]; then
@@ -49,6 +56,9 @@ elif [ -z "$parameterU" ]; then
 elif [ -z "$parameterP" ]; then
   echo "Missing -p parameter. Enter the password of the FTP server."
   helpFunction
+elif [ -z "$parameterK" ]; then
+  echo "Missing -k parameter. Enter the UniFi Network local API key."
+  helpFunction
 elif [ -n "$parameterR" ]; then
   if [ "1" = "$parameterR" ]; then
     echo ""
@@ -67,157 +77,228 @@ echo ""
 echo "Checking privileges."
 if [ "$EUID" -ne 0 ]
   then echo "Please run as root or sudo /bin/bash."
-  exit 1 #needs root for apt update and install as well as script creation chmod
+  exit 1 #needs root for script creation, chmod, crontab and the boot-runner install
 fi
 echo "Running as root."
 
-# Check if autobackup is in the right location
+# Check this is a Unifi OS console with the Network backup directory
 echo ""
 echo "Checking Unifi OS version and hardware."
-AUTOBACKUP_LOCATION=$([ -d "/data/unifi/data/backup/autobackup" ] && echo "autobackup exists.")
-if [ "" = "$AUTOBACKUP_LOCATION" ]; then
-  echo "Unifi OS is out of date, or this script is runnning on unsupported hardware."
-  exit 1 #cannot run unless autobackup is in the correct location
+if [ ! -d "/data/unifi/data/backup" ]; then
+  echo "Unifi OS is out of date, or this script is running on unsupported hardware."
+  echo "Expected directory /data/unifi/data/backup was not found."
+  exit 1 #cannot run unless the Network backup directory exists
 fi
 echo "Running on correct Unifi OS version and hardware."
 
-# Check if autobackup has files to backup
+# Validate the API key against the local Network API (curl is preinstalled on Unifi OS)
 echo ""
-echo "Checking autobackup folder contents."
-files=$(shopt -s nullglob dotglob; echo /data/unifi/data/backup/autobackup/*)
-if (( ${#files} ))
-then
-  echo "Unifi Network appears to be backing up files to autobackup."
+echo "Validating API key against the local Network API."
+API_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" -H "X-API-KEY: $parameterK" "https://localhost/proxy/network/integration/v1/sites")
+if [ "$API_HTTP" = "200" ]; then
+  echo "API key accepted by the integration API (HTTP 200)."
 else
   echo ""
   echo "!!WARNING!!"
-  echo "autobackup is empty."
+  echo "API key check returned HTTP $API_HTTP (expected 200)."
+  echo "The integration API may be disabled on this firmware, or the key/role may be wrong."
+  echo "Backups use the internal API, which may still accept this key."
   echo "!!WARNING!!"
-  echo "Check the settings for Unifi network's backup schedule."
   echo ""
-  echo "The script will now proceed with the lftp_autoupload setup in 5 seconds."
+  echo "The script will proceed in 5 seconds. Ctrl+C to abort."
   sleep 5
 fi
 
-#apt update
-echo ""
-echo "Running an Apt update."
-sudo apt update
-aptupdate_status=$?
-if [ $aptupdate_status -eq 0 ]; then
-  echo "Apt update was successful."
-else
-  echo "Apt update failed. do you want to continue anyway?"
-  select yn in "Yes" "No"; do
-    case $yn in
-      Yes ) echo "Continuing..."; break;;
-      No ) exit 1;;
-    esac
+# Function: write the auto-upload script
+#   - ensures curl + lftp (both wiped by firmware updates) at run time
+#   - creates a fresh backup via the local Network API
+#   - mirrors it to FTP
+write_upload_script()
+{
+cat > /data/unifi/data/backup/lftp_autoupload.sh <<EOF
+#!/bin/bash
+# Auto-generated by ftp_setup.sh
+
+# --- Ensure required packages (wiped by firmware updates) ---
+ensure_pkg() {
+  pkg="\$1"
+  if dpkg-query -W --showformat='\${Status}' "\$pkg" 2>/dev/null | grep -q "install ok installed"; then
+    return 0
+  fi
+  echo "\$(date '+%F %T') \$pkg missing - installing."
+  for i in 1 2 3 4 5 6; do
+    apt-get update -y >/dev/null 2>&1
+    if apt-get install -y "\$pkg" >/dev/null 2>&1; then
+      echo "\$(date '+%F %T') \$pkg installed."
+      return 0
+    fi
+    echo "\$(date '+%F %T') \$pkg install attempt \$i failed (network not ready?). Retrying in 30s."
+    sleep 30
   done
+  echo "\$(date '+%F %T') ERROR: could not install \$pkg." >&2
+  return 1
+}
+
+ensure_pkg curl || exit 1
+ensure_pkg lftp || exit 1
+
+# --- FTP target ---
+HOST='${parameterI}'
+USER='${parameterU}'
+PASS='${parameterP}'
+TARGETFOLDER='${parameterF}'
+
+# --- UniFi local API ---
+APIKEY='${parameterK}'
+SITE='${SITE_PARAM}'
+BASE='https://localhost/proxy/network'
+DAYS=-1   # -1 = full backup (all historical data); 0 = settings only
+
+# --- Local staging + retention ---
+SOURCEFOLDER='/data/unifi/data/backup/ftp_staging/'
+KEEP=30   # number of .unf files to keep locally (and therefore mirrored remotely)
+
+mkdir -p "\$SOURCEFOLDER"
+
+echo "\$(date '+%F %T') Requesting a new backup from the UniFi API..."
+URL=\$(curl -sk -X POST "\$BASE/api/s/\$SITE/cmd/backup" \\
+  -H 'Content-Type: application/json' \\
+  -H "X-API-KEY: \$APIKEY" \\
+  -d '{"cmd":"backup","days":'"\$DAYS"'}' \\
+  | grep -oE '"url":"[^"]*"' | cut -d'"' -f4)
+case "\$URL" in /*) ;; *) URL="/\$URL";; esac
+
+if [ -z "\$URL" ]; then
+  echo "\$(date '+%F %T') ERROR: API returned no backup URL. Check the API key and its role/permissions." >&2
+  exit 1
 fi
 
-# Check for LFTP
-echo ""
-echo "Checking if LFTP is installed."
-LFTP_CHECK=$(dpkg-query -W --showformat='${Status}\n' lftp | grep "install ok installed")
-echo "LFTP: $LFTP_CHECK"
-if [ "" = "$LFTP_CHECK" ]; then
-  echo "LFTP is not installed. Installing now."
-  sudo apt-get --yes install lftp
-  lftpinstall_status=$?
-  if [ $lftpinstall_status -eq 0 ]; then
-    echo "LFTP install was successful."
+OUTFILE="\${SOURCEFOLDER}unifi-\$(date +%F-%H%M).unf"
+echo "\$(date '+%F %T') Downloading backup to \$OUTFILE"
+curl -sk -H "X-API-KEY: \$APIKEY" "\$BASE\$URL" -o "\$OUTFILE"
+
+if [ ! -s "\$OUTFILE" ]; then
+  echo "\$(date '+%F %T') ERROR: downloaded backup is empty. Aborting upload." >&2
+  rm -f "\$OUTFILE"
+  exit 1
+fi
+
+# Keep only the newest \$KEEP backups locally
+ls -1t "\$SOURCEFOLDER"*.unf 2>/dev/null | tail -n +\$((KEEP+1)) | xargs -r rm -f
+
+echo "\$(date '+%F %T') Mirroring \$SOURCEFOLDER to FTP server \$HOST"
+lftp -f "
+set ssl-allow true
+set ssl:verify-certificate false
+open \$HOST
+user \$USER \$PASS
+lcd \$SOURCEFOLDER
+mirror -p --reverse --delete --verbose \$SOURCEFOLDER \$TARGETFOLDER
+bye
+"
+echo "\$(date '+%F %T') Backup and upload complete."
+EOF
+chmod 700 /data/unifi/data/backup/lftp_autoupload.sh
+}
+
+# Function: write the on_boot.d handler (cron-only; packages handled by the upload script)
+#   Idempotent: enforces exactly one correct cron line, so re-running with a new
+#   schedule (or after a firmware update that wiped crontab) converges correctly.
+write_boot_script()
+{
+mkdir -p /data/on_boot.d
+cat > /data/on_boot.d/99-unifi-ftp-backup.sh <<EOF
+#!/bin/bash
+# Auto-generated by ftp_setup.sh - persisted in /data/on_boot.d
+# Refreshes the cron entry at every boot (crontab is wiped by firmware updates).
+# curl + lftp are (re)installed by the upload script itself at run time.
+
+UPLOAD_SCRIPT="/data/unifi/data/backup/lftp_autoupload.sh"
+CRON_SCHEDULE="${parameterM} ${parameterH} * * 0"
+LOG="/data/unifi/data/backup/ftp_backup_boot.log"
+
+log() { echo "\$(date '+%F %T') [boot] \$*" >> "\$LOG"; }
+
+log "on_boot handler starting."
+
+if [ -x "\$UPLOAD_SCRIPT" ]; then
+  WANT="\$CRON_SCHEDULE \$UPLOAD_SCRIPT"
+  if crontab -l 2>/dev/null | grep -qxF "\$WANT"; then
+    log "Cron entry already correct: \$WANT"
   else
-    echo "LFTP install failed. Review apt logs and rectify error."
-    exit 1 #LFTP is required to run the autoupload script.
+    log "Setting cron entry: \$WANT"
+    ( crontab -l 2>/dev/null | grep -vF "\$UPLOAD_SCRIPT"; echo "\$WANT" ) | crontab -
   fi
+else
+  log "ERROR: upload script \$UPLOAD_SCRIPT not found or not executable."
 fi
 
-# Check for nano
-echo ""
-echo "Checking if Nano is installed."
-NANO_CHECK=$(dpkg-query -W --showformat='${Status}\n' nano | grep "install ok installed")
-echo "Nano: $NANO_CHECK"
-if [ "" = "$NANO_CHECK" ]; then
-  echo "Nano is not installed. Installing now."
-  sudo apt-get --yes install nano
-  nanoinstall_status=$?
-  if [ $nanoinstall_status -eq 0 ]; then
-    echo "NANO install was successful."
-  else
-    echo "NANO install failed. Review apt logs and rectify error."
-    exit 1 #NANO is required to run the autoupload script.
-  fi
-fi
+log "on_boot handler finished."
+EOF
+chmod +x /data/on_boot.d/99-unifi-ftp-backup.sh
+}
 
-# Check if lftp_autoupload.sh exists
+# Write the upload script
 echo ""
 echo "Checking for pre-existing lftp_autoupload.sh script."
 if [ -e /data/unifi/data/backup/lftp_autoupload.sh ]; then
   if [ "1" = "$parameterR" ]; then
     echo "Upload script lftp_autoupload.sh found. -r is set to 1. Replacing now."
-    rm -rf /data/unifi/data/backup/lftp_autoupload.sh
-    touch /data/unifi/data/backup/lftp_autoupload.sh
-    echo '#!/bin/bash' > /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'HOST='$parameterI'' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'USER='$parameterU'' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'PASS='$parameterP'' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'TARGETFOLDER='$parameterF'' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'SOURCEFOLDER='/data/unifi/data/backup/autobackup/'' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo '' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'lftp -f "' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'set ssl-allow true' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'set ssl:verify-certificate false' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'open $HOST' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'user $USER $PASS' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'lcd $SOURCEFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'mirror -p --reverse --delete --verbose $SOURCEFOLDER $TARGETFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo 'bye' >> /data/unifi/data/backup/lftp_autoupload.sh
-    echo '"' >> /data/unifi/data/backup/lftp_autoupload.sh
-    chmod +x /data/unifi/data/backup/lftp_autoupload.sh
+    write_upload_script
     echo "Upload script lftp_autoupload.sh has been replaced."
   else
     echo "Upload script lftp_autoupload.sh found. -r is not set to 1. Won't be replacing."
-  fi 
+  fi
 else
-  touch /data/unifi/data/backup/lftp_autoupload.sh
-  echo '#!/bin/bash' > /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'HOST='$parameterI'' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'USER='$parameterU'' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'PASS='$parameterP'' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'TARGETFOLDER='$parameterF'' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'SOURCEFOLDER='/data/unifi/data/backup/autobackup/'' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo '' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'lftp -f "' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'set ssl-allow true' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'set ssl:verify-certificate false' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'open $HOST' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'user $USER $PASS' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'lcd $SOURCEFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'mirror -p --reverse --delete --verbose $SOURCEFOLDER $TARGETFOLDER' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo 'bye' >> /data/unifi/data/backup/lftp_autoupload.sh
-  echo '"' >> /data/unifi/data/backup/lftp_autoupload.sh
-  chmod +x /data/unifi/data/backup/lftp_autoupload.sh
+  write_upload_script
   echo "Upload script lftp_autoupload.sh has been created."
 fi
 
-#Check for previous crontab LFTP entries
+# --- Persist via /data/on_boot.d so the cron entry survives firmware updates ---
+# The boot handler is generated plumbing (no hand-edited values), so it is always
+# overwritten to stay in sync with the current schedule.
 echo ""
-echo "Checking if lftp_autoupload entry already exists in crontab."
-CRONTAB_LFTP=$(crontab -l | grep "/data/unifi/data/backup/lftp_autoupload.sh")
-if [ "" != "$CRONTAB_LFTP" ]; then
-  echo "Cron job is already installed."
-  echo ""
-  exit 0
+echo "Installing on_boot.d cron handler."
+write_boot_script
+echo "Boot handler written to /data/on_boot.d/99-unifi-ftp-backup.sh"
+
+# Ensure the on_boot.d runner (unifi-common / udm-boot.service) is installed.
+# Current UDM Pro firmware (UniFi OS 4.x) does NOT run /data/on_boot.d natively,
+# so without this nothing runs the handler and cron will not survive a reboot.
+echo ""
+echo "Checking for the on_boot.d runner (udm-boot.service)."
+if systemctl is-enabled udm-boot.service >/dev/null 2>&1; then
+  echo "udm-boot.service is installed and enabled - boot scripts will run on every boot."
+else
+  echo "udm-boot.service not found. Installing the unifi-common boot runner (requires internet)..."
+  curl -fsL "https://raw.githubusercontent.com/unifi-utilities/unifi-common/HEAD/remote_install.sh" | /bin/bash
+  if systemctl is-enabled udm-boot.service >/dev/null 2>&1; then
+    echo "udm-boot.service installed and enabled."
+  else
+    echo ""
+    echo "!!WARNING!!"
+    echo "udm-boot.service is still not enabled after the install attempt."
+    echo "Possible causes: no internet, UniFi OS older than 4.x, or an unsupported device model."
+    echo "Without it, /data/on_boot.d scripts will NOT run and cron will NOT survive a reboot."
+    echo "Reinstall manually with:"
+    echo "  curl -fsL \"https://raw.githubusercontent.com/unifi-utilities/unifi-common/HEAD/remote_install.sh\" | /bin/bash"
+    echo "!!WARNING!!"
+  fi
 fi
 
-#Install crontab schedule
-(crontab -l ; echo "$parameterM $parameterH * * 0 /data/unifi/data/backup/lftp_autoupload.sh") | crontab -
-croninstall_status=$?
-if [ $croninstall_status -eq 0 ]; then
-  echo "Cron job has been successfully installed."
+# Run the handler now to install/refresh the cron entry immediately
+echo ""
+echo "Running the boot handler once to set up cron now."
+/bin/bash /data/on_boot.d/99-unifi-ftp-backup.sh
+echo "Handler output is logged to /data/unifi/data/backup/ftp_backup_boot.log"
+
+# Verify
+echo ""
+if crontab -l 2>/dev/null | grep -qF "/data/unifi/data/backup/lftp_autoupload.sh"; then
+  echo "Cron job is installed:"
+  crontab -l 2>/dev/null | grep -F "/data/unifi/data/backup/lftp_autoupload.sh"
   exit 0
 else
-  echo "Cron job could not be installed. The script has not been automated. Check cron logs and rectify error."
-  exit 1 #Cron job needs to be installed to run automatically
+  echo "Cron job could not be installed. Check /data/unifi/data/backup/ftp_backup_boot.log."
+  exit 1
 fi
