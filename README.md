@@ -14,7 +14,7 @@ For example, the following hardware is technically still supported by Unifi, but
  - Unifi Dream Machine
  - Unifi Dream Router
 
-There is a solution. Most people don’t need a full backup of their Unifi Console. They're mainly interested in restoring a backup of just Unifi Network, the application that runs on top of Unifi Console for managing their network environment. With this in mind, I have put together this script. This script will automatically set up Unifi hardware running Unifi Network to create a Unifi Network backup and send it to an FTP server every week at a time of your choosing.
+There is a solution. Most people don’t need a full backup of their Unifi Console. They're mainly interested in restoring a backup of just Unifi Network, the application that runs on top of Unifi Console for managing their network environment. With this in mind, I have put together this script. This script will automatically set up Unifi hardware running Unifi Network to create a Unifi Network backup and send it to an FTP server every hour, at a minute past the hour of your choosing.
 
 ## How it works
 
@@ -54,12 +54,11 @@ Download the script, then execute it as root with the parameters set to your use
 ```bash
 curl -O https://raw.githubusercontent.com/ccros44/Unifi-Network-FTP-Backup/refs/heads/main/ftp_setup.sh
 chmod +x ftp_setup.sh
-sudo ./ftp_setup.sh -h 01 -m 10 -f '/FTP/Folder/For/Backups' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -k 'your-api-key' -s 'default' -r 1
+sudo ./ftp_setup.sh -m 10 -f '/FTP/Folder/For/Backups' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -k 'your-api-key' -s 'default' -r 1
 ```
 
 Edit the parameters of the last command as follows:
- - h - The hour that you want the backup to run.
- - m - The minute you want the backup to run.
+ - m - The minute past each hour that you want the backup to run (0-59).
  - f - Folder on the FTP server where you want to backup to. Put in '' to escape special characters.
  - i - IP address of the FTP server. Put in '' to escape special characters.
  - u - Username of the FTP server. Put in '' to escape special characters.
@@ -68,7 +67,7 @@ Edit the parameters of the last command as follows:
  - s - (OPTIONAL) Unifi site name. Defaults to 'default'.
  - r - (OPTIONAL) Set -r to 1 to replace any lftp_autoupload.sh previously created.
 
-The backup runs once a week (on Sunday) at the hour and minute you specify.
+The backup runs every hour at the minute you specify.
 
 ## Persistence & firmware updates
 

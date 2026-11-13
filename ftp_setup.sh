@@ -4,9 +4,8 @@
 helpFunction()
 {
   echo ""
-  echo "Usage Example: $0 -h 01 -m 10 -f '/CloudKeys/Client/Folder/' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -k 'your-api-key' -s 'default' -r 1"
-  echo -e "\t-h - The hour that you want the backup to run."
-  echo -e "\t-m - The minute you want the backup to run."
+  echo "Usage Example: $0 -m 10 -f '/CloudKeys/Client/Folder/' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -k 'your-api-key' -s 'default' -r 1"
+  echo -e "\t-m - The minute past each hour that you want the backup to run (0-59)."
   echo -e "\t-f - Folder on the FTP server where you want to backup to. Put in '' to escape special characters."
   echo -e "\t-i - IP address of the FTP server. Put in '' to escape special characters."
   echo -e "\t-u - Username of the FTP server. Put in '' to escape special characters."
@@ -18,10 +17,9 @@ helpFunction()
 }
 
 # Get Parameters
-while getopts "h:m:f:i:u:p:k:s:r:" opt
+while getopts "m:f:i:u:p:k:s:r:" opt
 do
   case "$opt" in
-    h ) parameterH="$OPTARG" ;;
     m ) parameterM="$OPTARG" ;;
     f ) parameterF="$OPTARG" ;;
     i ) parameterI="$OPTARG" ;;
@@ -38,11 +36,8 @@ done
 SITE_PARAM=${parameterS:-default}
 
 # Print Help in case parameters are empty
-if [ -z "$parameterH" ]; then
-  echo "Missing -h parameter. Enter the hour you want the backup to run."
-  helpFunction
-elif [ -z "$parameterM" ]; then
-  echo "Missing -m parameter. Enter the minute you want the backup to run."
+if [ -z "$parameterM" ]; then
+  echo "Missing -m parameter. Enter the minute past the hour you want the backup to run."
   helpFunction
 elif [ -z "$parameterF" ]; then
   echo "Missing -f parameter. Enter the folder on the FTP server you want to backup to."
@@ -214,7 +209,7 @@ cat > /data/on_boot.d/99-unifi-ftp-backup.sh <<EOF
 # curl + lftp are (re)installed by the upload script itself at run time.
 
 UPLOAD_SCRIPT="/data/unifi/data/backup/lftp_autoupload.sh"
-CRON_SCHEDULE="${parameterM} ${parameterH} * * 0"
+CRON_SCHEDULE="${parameterM} * * * *"
 LOG="/data/unifi/data/backup/ftp_backup_boot.log"
 
 log() { echo "\$(date '+%F %T') [boot] \$*" >> "\$LOG"; }
