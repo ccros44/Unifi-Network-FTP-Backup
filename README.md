@@ -21,8 +21,8 @@ There is a solution. Most people don’t need a full backup of their Unifi Conso
 Earlier versions of this script relied on Unifi Network's scheduled **auto-backup** files already being present on local storage (`/data/unifi/data/backup/autobackup`). Newer Unifi Network releases no longer reliably keep those files locally, so the script now **creates a fresh backup on demand via the Unifi Network local API** instead.
 
 On a schedule, the generated upload script:
-1. Authenticates to the local Network API with an **API key** (`X-API-KEY`) and triggers a new backup (`/proxy/network/api/s/<site>/cmd/backup`).
-2. Downloads the resulting `.unf` file into a staging folder (`/data/unifi/data/backup/ftp_staging`), keeping the most recent 30 backups.
+1. Authenticates to the local Network API with an **API key** (`X-API-KEY`) and triggers a new **settings-only** backup (`/proxy/network/api/s/<site>/cmd/backup`). Settings-only backups leave out historical statistics, so each file is small and quick to create.
+2. Downloads the resulting `.unf` file into a staging folder (`/data/unifi/data/backup/ftp_staging`), keeping as many days of hourly backups as you choose with `-d` (default 7 days = 168 backups).
 3. Mirrors the staging folder to your FTP server with `lftp`.
 
 It also installs an `on_boot.d` handler so the schedule is automatically restored after a reboot, and it (re)installs `curl`/`lftp` at run time of the lftp_upload.sh script if a firmware update has removed them.
@@ -54,7 +54,7 @@ Download the script, then execute it as root with the parameters set to your use
 ```bash
 curl -O https://raw.githubusercontent.com/ccros44/Unifi-Network-FTP-Backup/refs/heads/main/ftp_setup.sh
 chmod +x ftp_setup.sh
-sudo ./ftp_setup.sh -m 10 -f '/FTP/Folder/For/Backups' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -k 'your-api-key' -s 'default' -r 1
+sudo ./ftp_setup.sh -m 10 -f '/FTP/Folder/For/Backups' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -k 'your-api-key' -s 'default' -d 7 -r 1
 ```
 
 Edit the parameters of the last command as follows:
@@ -65,9 +65,10 @@ Edit the parameters of the last command as follows:
  - p - Password of the FTP server. Put in '' to escape special characters.
  - k - Unifi Network local API key. Put in '' to escape special characters.
  - s - (OPTIONAL) Unifi site name. Defaults to 'default'.
+ - d - (OPTIONAL) Number of days of backups to keep, on the console and on the FTP server. Defaults to 7 (168 hourly backups). To change it on an existing install, re-run with -r 1.
  - r - (OPTIONAL) Set -r to 1 to replace any lftp_autoupload.sh previously created.
 
-The backup runs every hour at the minute you specify.
+The backup runs every hour at the minute you specify. Backups older than the retention period you set with `-d` are removed from both the console and the FTP server.
 
 ## Persistence & firmware updates
 

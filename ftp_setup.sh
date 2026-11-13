@@ -4,7 +4,7 @@
 helpFunction()
 {
   echo ""
-  echo "Usage Example: $0 -m 10 -f '/CloudKeys/Client/Folder/' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -k 'your-api-key' -s 'default' -r 1"
+  echo "Usage Example: $0 -m 10 -f '/CloudKeys/Client/Folder/' -i 'ftp://192.168.0.1:21' -u 'admin' -p 'admin' -k 'your-api-key' -s 'default' -d 7 -r 1"
   echo -e "\t-m - The minute past each hour that you want the backup to run (0-59)."
   echo -e "\t-f - Folder on the FTP server where you want to backup to. Put in '' to escape special characters."
   echo -e "\t-i - IP address of the FTP server. Put in '' to escape special characters."
@@ -12,12 +12,13 @@ helpFunction()
   echo -e "\t-p - Password of the FTP server. Put in '' to escape special characters."
   echo -e "\t-k - UniFi Network local API key (Settings > Control Plane > Integrations). Put in '' to escape special characters."
   echo -e "\t-s - (OPTIONAL) UniFi site name. Defaults to 'default'."
+  echo -e "\t-d - (OPTIONAL) Number of days of backups to keep (on the console and the FTP server). Defaults to 7. Re-run with -r 1 to change it on an existing install."
   echo -e "\t-r - (OPTIONAL) Set -r to 1 to enable replacement of any lftp_autoupload.sh previously created."
   exit 1 # Exit script after printing help
 }
 
 # Get Parameters
-while getopts "m:f:i:u:p:k:s:r:" opt
+while getopts "m:f:i:u:p:k:s:d:r:" opt
 do
   case "$opt" in
     m ) parameterM="$OPTARG" ;;
@@ -27,6 +28,7 @@ do
     p ) parameterP="$OPTARG" ;;
     k ) parameterK="$OPTARG" ;;
     s ) parameterS="$OPTARG" ;;
+    d ) parameterD="$OPTARG" ;;
     r ) parameterR="$OPTARG" ;;
     ? ) helpFunction ;; # Print helpFunction in case parameter is non-existent
   esac
@@ -34,6 +36,7 @@ done
 
 # Default optional parameters
 SITE_PARAM=${parameterS:-default}
+RETENTION_DAYS=${parameterD:-7}
 
 # Print Help in case parameters are empty
 if [ -z "$parameterM" ]; then
@@ -66,6 +69,15 @@ elif [ -z "$parameterR" ]; then
   echo ""
   echo "Missing -r parameter. Will not be replacing lftp_autoupload.sh if found."
 fi
+
+# Validate retention (-d): must be a whole number of days, 1 or more
+if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || [ "$((10#$RETENTION_DAYS))" -lt 1 ]; then
+  echo "-d parameter not set correctly. Enter a whole number of days (1 or more), or leave -d out for 7."
+  helpFunction
+fi
+RETENTION_DAYS=$((10#$RETENTION_DAYS)) # strip leading zeros so bash doesn't read it as octal
+echo ""
+echo "Keeping $RETENTION_DAYS days of backups ($((RETENTION_DAYS * 24)) hourly backups)."
 
 # Check if running as root
 echo ""
@@ -147,11 +159,12 @@ TARGETFOLDER='${parameterF}'
 APIKEY='${parameterK}'
 SITE='${SITE_PARAM}'
 BASE='https://localhost/proxy/network'
-DAYS=-1   # -1 = full backup (all historical data); 0 = settings only
+DAYS=0    # 0 = settings only (no historical statistics); -1 = full backup with all history
 
 # --- Local staging + retention ---
 SOURCEFOLDER='/data/unifi/data/backup/ftp_staging/'
-KEEP=30   # number of .unf files to keep locally (and therefore mirrored remotely)
+RETENTION_DAYS=${RETENTION_DAYS}   # days of backups to keep (set by ftp_setup.sh -d)
+KEEP=\$((RETENTION_DAYS * 24))     # backups run hourly, so keep this many .unf files (locally and on FTP)
 
 mkdir -p "\$SOURCEFOLDER"
 
